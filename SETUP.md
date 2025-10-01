@@ -124,3 +124,9 @@ Torch Version: 2.8.0+cu128
 CUDA Version: 12.8
 PyG Version: 2.6.1
 ```
+
+## 9. Run Prediction Script
+
+```bash
+sudo venv/bin/python predict.py <path_to_model>
+```
