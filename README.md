@@ -1,5 +1,7 @@
 ## ThreatWatch Backend
 
+See [SETUP.md](./SETUP.md) for detailed setup instructions.
+
 Create and activate a virtual environment
 ```bash
 python -m venv venv
