@@ -1,14 +1,17 @@
 # model.py
 import torch
+import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset
+from torch_geometric.data import Data
 from torch.nn import Linear, Dropout
 from torch_geometric.nn import (
     GCNConv, SAGEConv, GATConv,
     global_max_pool, global_mean_pool
 )
 from torch_geometric.data import Batch
-import warnings
+import warnings, logging
 warnings.filterwarnings("ignore", message=".*pyg-lib.*")
 
 
@@ -112,3 +115,92 @@ class FTGNet(nn.Module):
             traffic_graph.x = flow_embeddings
 
         return self.traffic_gnn(traffic_graph)
+
+
+class FTGDataset(Dataset):
+    """
+    Flexible FTG Dataset for live NFStreamer traffic.
+    - Allows single-flow slots (creates self-loop edges if needed).
+    - Still groups by (Source IP, Destination IP).
+    """
+
+    def __init__(self, df, time_slot_duration='5S'):
+        super().__init__()
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        df = df.set_index('Timestamp').sort_index()
+        all_time_slots = [group for _, group in df.groupby(pd.Grouper(freq=time_slot_duration))]
+
+        self.valid_time_slots = []
+        logging.debug("Filtering valid time slots...")
+        for slot in all_time_slots:
+            if slot.empty:
+                continue
+
+            endpoint_groups = slot.groupby(['Source IP', 'Destination IP'])
+            traffic_graph_nodes = list(endpoint_groups.groups.keys())
+
+            # allow 1 or more flows
+            if len(traffic_graph_nodes) < 1:
+                continue
+
+            self.valid_time_slots.append(slot)
+
+        logging.debug(f"Created {len(self.valid_time_slots)} valid time slots of duration {time_slot_duration}.")
+
+    def __len__(self):
+        return len(self.valid_time_slots)
+
+    def __getitem__(self, idx):
+        time_slot_df = self.valid_time_slots[idx]
+        endpoint_groups = time_slot_df.groupby(['Source IP', 'Destination IP'])
+        flow_graphs, traffic_graph_node_map = [], {}
+
+        # numeric feature columns
+        feature_cols = [
+            'Average Packet Size', 'Bwd Packets/s',
+            'FIN Flag Count', 'SYN Flag Count', 'RST Flag Count',
+            'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
+            'CWE Flag Count', 'ECE Flag Count', 'Flow Packets/s'
+        ]
+
+        for (src_ip, dst_ip), group in endpoint_groups:
+            traffic_graph_node_map[(src_ip, dst_ip)] = len(traffic_graph_node_map)
+
+            node_features = torch.tensor(group[feature_cols].values, dtype=torch.float)
+
+            # sequential temporal edges
+            if len(node_features) > 1:
+                edge_index = torch.tensor(
+                    [[i, i+1] for i in range(len(node_features) - 1)],
+                    dtype=torch.long
+                ).t().contiguous()
+            else:
+                # self-loop for single packet
+                edge_index = torch.tensor([[0], [0]], dtype=torch.long)
+
+            label = torch.tensor([group['Label'].max()], dtype=torch.float)
+            flow_graphs.append(Data(x=node_features, edge_index=edge_index, y=label))
+
+        # --- Build traffic graph edges ---
+        nodes = list(traffic_graph_node_map.keys())
+        traffic_edge_list = []
+
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                if nodes[i][0] == nodes[j][0] or nodes[i][1] == nodes[j][1]:
+                    traffic_edge_list.append([i, j])
+                    traffic_edge_list.append([j, i])
+
+        if len(traffic_edge_list) == 0 and len(nodes) == 1:
+            # single node graph with self-loop
+            traffic_edge_list = [[0, 0]]
+
+        traffic_edge_index = torch.tensor(traffic_edge_list, dtype=torch.long).t().contiguous()
+
+        traffic_graph = Data(
+            x=torch.empty((len(flow_graphs), len(feature_cols))),
+            edge_index=traffic_edge_index,
+            y=torch.cat([fg.y for fg in flow_graphs])
+        )
+
+        return traffic_graph, flow_graphs
