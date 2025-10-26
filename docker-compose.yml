@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: ddos-detection-app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DEVICE=cpu
+    volumes:
+      - ./app:/app/app
+      - ./models:/app/models
+      - ./data:/app/data
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - ddos-net
+
+networks:
+  ddos-net:
+    driver: bridge

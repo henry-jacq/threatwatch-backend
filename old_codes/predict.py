@@ -118,6 +118,7 @@ def try_load_model(model_path):
     # If state_dict includes traffic head weights, detect the output dim
     if isinstance(state_dict, dict) and "traffic_gnn.fc.weight" in state_dict:
         out_dim = int(state_dict["traffic_gnn.fc.weight"].shape[0])
+        print(out_dim)
         num_classes = out_dim if num_classes is None else num_classes
         logger.info(f"Detected traffic_gnn.fc weight shape -> out_dim={out_dim}")
 

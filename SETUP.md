@@ -30,10 +30,20 @@ source venv/bin/activate  # Linux/macOS
 
 ---
 
+Clear Cache
+```bash
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
+find . -type f -name "*.pyc" -delete
+```
+
+
 ## 2. Upgrade Core Python Packages
 
 ```bash
 pip install --upgrade pip setuptools wheel
+python3 -m ensurepip --upgrade
+python3 -m pip install --upgrade pip setuptools wheel
+
 ```
 
 ---

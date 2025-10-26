@@ -1,0 +1,5 @@
+{
+    "n_models": 3,
+    "aggregation": "soft_average",
+    "weights": null
+}
