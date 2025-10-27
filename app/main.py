@@ -3,12 +3,12 @@ FastAPI application entry point
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import os, logging
+import os
+import logging
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.api.routes import inference
+from app.api.routes import inference, pcap
 
 # Configure logging
 logging.basicConfig(
@@ -32,8 +32,8 @@ app = FastAPI(
     description="Real-time DDoS detection using FTG-NET",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",          # Explicitly set Swagger UI path
-    openapi_url="/openapi.json" # Explicitly set OpenAPI schema path
+    docs_url="/docs",
+    openapi_url="/openapi.json"
 )
 
 # CORS middleware
@@ -47,6 +47,7 @@ app.add_middleware(
 
 # Include routes
 app.include_router(inference.router)
+app.include_router(pcap.router)
 
 
 @app.get("/")
@@ -63,7 +64,9 @@ async def root():
             "openapi": "/openapi.json",
             "health": "/api/inference/health",
             "stats": "/api/inference/stats",
-            "predict": "/api/inference/predict-batch"
+            "predict": "/api/inference/predict",
+            "evaluate": "/api/inference/evaluate",
+            "pcap_convert": "/api/pcap/convert"
         }
     }
 
@@ -76,11 +79,10 @@ async def favicon():
 
 if __name__ == "__main__":
     import uvicorn
-    import os
     uvicorn.run(
-        app, 
-        host=settings.host, 
-        port=settings.port, 
+        app,
+        host=settings.host,
+        port=settings.port,
         reload=settings.reload,
         log_level="info"
     )
