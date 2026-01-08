@@ -20,7 +20,6 @@ from app.config import settings
 from app.core.ml.model_loader import model_manager
 from app.core.ml.preprocessing import preprocess_and_split_data
 from app.core.ml.inference import InferenceEngine
-from app.core.ml.model_registry import MODEL_REGISTRY
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/inference", tags=["inference"])
@@ -29,10 +28,7 @@ CANCEL_FLAGS: Dict[str, bool] = {}
 
 
 @router.post("/predict/pcap", response_model=InferenceResponse)
-async def predict_from_pcap(
-    file: UploadFile = File(...),
-    is_attack: bool = True
-):
+async def predict_from_pcap(file: UploadFile = File(...)):
     """
     Direct PCAP to FTG-NET inference (no CSV roundtrip)
     """
@@ -43,13 +39,10 @@ async def predict_from_pcap(
     model, scaler, _ = model_manager.load_model(settings.default_model_id)
     engine = InferenceEngine(model, model_manager.device)
 
-    # Convert PCAP → DataFrame
+    # Convert PCAP to DataFrame
     from app.core.traffic.pcap_converter import pcap_bytes_to_dataframe
 
-    df = pcap_bytes_to_dataframe(
-        await file.read(),
-        is_attack=is_attack
-    )
+    df = pcap_bytes_to_dataframe(await file.read())
 
     if df.empty:
         raise HTTPException(
@@ -75,17 +68,14 @@ async def predict_from_pcap(
     total_slots = len(dataset)
     log_every = max(1, total_slots // 10)
 
-    for i in range(total_slots):
-        tg, fg = dataset[i]
+    for idx, (tg, fg) in enumerate(dataset, start=1):
         traffic_graphs.append(tg)
         flow_graphs.append(fg)
 
-        if (i + 1) % log_every == 0 or (i + 1) == total_slots:
+        if idx % log_every == 0 or idx == total_slots:
             logger.info(
-                "pcap-predict: %d/%d slots (%.1f%%)",
-                i + 1,
-                total_slots,
-                (i + 1) / total_slots * 100
+                "PCAP-Predict: %d/%d slots (%.1f%%)",
+                idx, total_slots, (idx / total_slots) * 100
             )
 
     # Inference
@@ -110,7 +100,7 @@ async def predict_from_pcap(
     ])
 
     logger.info(
-        "✅ /predict/pcap done | slots=%d | attacks=%d | avg_conf=%.4f | %.2f ms",
+        "PCAP Predicted | slots=%d | attacks=%d | avg_conf=%.4f | %.2f ms",
         len(preds),
         attack_count,
         avg_conf,
@@ -133,13 +123,21 @@ async def predict_unlabeled(file: UploadFile = File(...)):
     import time
     start_time = time.time()
 
-    model, scaler, _ = model_manager.load_model()
+    model, scaler, _ = model_manager.load_model(settings.default_model_id)
 
     df = read_csv_safe(await file.read())
     df.columns = df.columns.str.strip()
+
     validate_csv_headers(df, require_label=False)
 
-    df, _ = preprocess_and_split_data(df, fit_scaler=False, scaler=scaler)
+    if "Label" in df.columns:
+        df = df.drop(columns=["Label"])
+
+    df, _ = preprocess_and_split_data(
+        df,
+        fit_scaler=False,
+        scaler=scaler
+    )
 
     dataset = FTGDataset(df, has_labels=False)
     engine = InferenceEngine(model, model_manager.device)
@@ -148,15 +146,14 @@ async def predict_unlabeled(file: UploadFile = File(...)):
     total_slots = len(dataset)
     log_every = max(1, total_slots // 10)
 
-    for i in range(total_slots):
-        tg, fg = dataset[i]
+    for idx, (tg, fg) in enumerate(dataset, start=1):
         traffic_graphs.append(tg)
         flow_graphs.append(fg)
 
-        if (i + 1) % log_every == 0 or (i + 1) == total_slots:
+        if idx % log_every == 0 or idx == total_slots:
             logger.info(
                 "predicting: %d/%d slots (%.1f%%)",
-                i + 1, total_slots, (i + 1) / total_slots * 100
+                idx, total_slots, (idx / total_slots) * 100
             )
 
     batch = engine.predict_batch(traffic_graphs, flow_graphs)
@@ -174,12 +171,6 @@ async def predict_unlabeled(file: UploadFile = File(...)):
         else r["probability"]
         for r in preds
     ])
-
-    logger.info(
-        "✅ /predict done | slots=%d | attacks=%d | avg_conf=%.4f | %.2f ms",
-        len(preds), attack_count, avg_conf,
-        (time.time() - start_time) * 1000
-    )
 
     return InferenceResponse(
         total_samples=len(preds),
@@ -203,7 +194,7 @@ async def predict_stream(file: UploadFile = File(...)):
 
         yield f"data: {json.dumps({'stage': 'job_started', 'job_id': job_id})}\n\n"
 
-        model, scaler, _ = model_manager.load_model()
+        model, scaler, _ = model_manager.load_model(settings.default_model_id)
         engine = InferenceEngine(model, model_manager.device)
 
         yield f"data: {json.dumps({'stage': 'preprocessing'})}\n\n"
@@ -219,20 +210,19 @@ async def predict_stream(file: UploadFile = File(...)):
 
         traffic_graphs, flow_graphs = [], []
 
-        for i in range(total):
+        for idx, (tg, fg) in enumerate(dataset, start=1):
             if CANCEL_FLAGS.get(job_id):
                 yield f"data: {json.dumps({'stage': 'cancelled', 'job_id': job_id})}\n\n"
                 CANCEL_FLAGS.pop(job_id, None)
                 return
 
-            tg, fg = dataset[i]
             traffic_graphs.append(tg)
             flow_graphs.append(fg)
 
-            if (i + 1) % step == 0 or (i + 1) == total:
+            if (idx + 1) % step == 0 or (idx + 1) == total:
                 yield f"data: {json.dumps({
                     'stage': 'progress',
-                    'current': i + 1,
+                    'current': idx + 1,
                     'total': total
                 })}\n\n"
 
@@ -270,7 +260,7 @@ async def predict_stream(file: UploadFile = File(...)):
 
 @router.post("/evaluate", response_model=EvaluationResponse)
 async def evaluate_labeled(file: UploadFile = File(...)):
-    model, scaler, _ = model_manager.load_model()
+    model, scaler, _ = model_manager.load_model(settings.default_model_id)
 
     df = read_csv_safe(await file.read())
     df.columns = df.columns.str.strip()
@@ -318,7 +308,7 @@ async def evaluate_labeled(file: UploadFile = File(...)):
 @router.post("/cancel/{job_id}")
 async def cancel_job(job_id: str):
     CANCEL_FLAGS[job_id] = True
-    logger.warning("❌ Job cancelled: %s", job_id)
+    logger.warning("Job cancelled: %s", job_id)
     return {"status": "cancelled", "job_id": job_id}
 
 
@@ -351,7 +341,7 @@ async def switch_model(model_id: str):
 async def health_check():
     """Health check"""
     try:
-        model_manager.load_model()
+        model_manager.load_model(settings.default_model_id)
         return {"status": "Healthy", "model": "FTG-NET v1", "device": str(model_manager.device)}
     except Exception as e:
         return {"status": "Unhealthy", "error": str(e)}

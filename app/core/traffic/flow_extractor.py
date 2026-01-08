@@ -13,11 +13,11 @@ class FlowExtractor:
     
     # Feature columns matching your model
     FEATURE_COLS = [
-        'Source IP', 'Destination IP', 'Timestamp', 'Label',
-        'Average Packet Size', 'Bwd Packets/s', 'FIN Flag Count',
-        'SYN Flag Count', 'RST Flag Count', 'PSH Flag Count', 
-        'ACK Flag Count', 'URG Flag Count', 'CWE Flag Count', 
-        'ECE Flag Count', 'Flow Packets/s'
+        'Source IP', 'Destination IP', 'Timestamp',
+        'Average Packet Size', 'Bwd Packets/s',
+        'FIN Flag Count', 'SYN Flag Count', 'RST Flag Count',
+        'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
+        'CWE Flag Count', 'ECE Flag Count', 'Flow Packets/s'
     ]
     
     def __init__(self, pcap_path: str, is_attack: bool = True):
@@ -188,7 +188,6 @@ class FlowExtractor:
                 'Source IP': src_ip,
                 'Destination IP': dst_ip,
                 'Timestamp': start_time.isoformat(),
-                'Label': 1 if self.is_attack else 0,  # 1 = attack, 0 = benign
                 'Average Packet Size': avg_packet_size,
                 'Bwd Packets/s': bwd_packets_per_sec,
                 'FIN Flag Count': flow_data['flags'].get('FIN', 0),

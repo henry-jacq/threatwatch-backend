@@ -19,4 +19,4 @@ MODEL_REGISTRY: Dict[str, dict] = {
     },
 }
 
-DEFAULT_MODEL_ID = "ftgnet_v1"
+DEFAULT_MODEL_ID = "ftg_net_v1"

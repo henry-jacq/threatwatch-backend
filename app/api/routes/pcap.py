@@ -21,23 +21,16 @@ async def convert_pcap(
     output_name: str = Query(
         "converted",
         description="Output filename (without .csv)"
-    ),
-    is_attack: bool = Query(
-        True,
-        description="Label flows as attack (true) or benign (false)"
     )
 ):
     """
-    Convert PCAP → CSV and return as downloadable file
+    Convert PCAP to CSV and return as downloadable file
     """
 
     try:
-        logger.info("📦 Converting PCAP: %s", file.filename)
+        logger.info("Converting PCAP: %s", file.filename)
 
-        df = pcap_bytes_to_dataframe(
-            await file.read(),
-            is_attack=is_attack
-        )
+        df = pcap_bytes_to_dataframe(await file.read())
 
         if df.empty:
             raise HTTPException(
@@ -45,7 +38,7 @@ async def convert_pcap(
                 detail="No flows extracted from PCAP"
             )
 
-        # Convert DataFrame → CSV (in memory)
+        # Convert DataFrame to CSV (in memory)
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)
@@ -72,13 +65,11 @@ async def convert_pcap(
 # PCAP to STATS (NO CSV)
 
 @router.post("/stats")
-async def pcap_stats(
-    file: UploadFile = File(...)
-):
+async def pcap_stats(file: UploadFile = File(...)):
     """
     Return statistics from PCAP without exporting CSV.
     """
-    logger.info("📊 PCAP stats request: %s", file.filename)
+    logger.info("PCAP stats request: %s", file.filename)
 
     df = pcap_bytes_to_dataframe(await file.read(), is_attack=True)
 
@@ -86,6 +77,5 @@ async def pcap_stats(
         "file": file.filename,
         "total_flows": len(df),
         "average_packet_size": float(df["Average Packet Size"].mean()),
-        "attack_ratio": float(df["Label"].mean()),
         "columns": list(df.columns)
     })

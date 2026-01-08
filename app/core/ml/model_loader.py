@@ -28,7 +28,7 @@ class ModelManager:
 
     def load_model(self, model_id: str, device: str = "auto"):
         if self._model is not None and getattr(self, "_model_id", None) == model_id:
-            logger.info("✅ Model already loaded (%s), returning cached instance", model_id)
+            logger.info("Model already loaded (%s), returning cached instance", model_id)
             return self._model, self._scaler, self._hyperparams
 
         if model_id not in MODEL_REGISTRY:
@@ -37,7 +37,7 @@ class ModelManager:
         checkpoint_path = MODEL_REGISTRY[model_id]["checkpoint"]
         self._model_id = model_id
 
-        logger.info("🔄 Loading model [%s] from %s", model_id, checkpoint_path)
+        logger.info("Loading model [%s] from %s", model_id, checkpoint_path)
 
         # --- device ---
         if device == "auto":
@@ -65,7 +65,7 @@ class ModelManager:
         self._model.to(self._device)
         self._model.eval()
 
-        logger.info("✅ Model [%s] loaded on %s", model_id, self._device)
+        logger.info("Model [%s] loaded on %s", model_id, self._device)
         return self._model, self._scaler, self._hyperparams
 
     @property
@@ -115,6 +115,11 @@ class ModelManager:
         logger.warning("Switched active model to %s", model_id)
 
     def get_active_model(self):
+        if self._active_model_id not in MODEL_REGISTRY:
+            raise RuntimeError(
+                f"Active model_id '{self._active_model_id}' not found in MODEL_REGISTRY"
+            )
+
         return {
             "model_id": self._active_model_id,
             "name": MODEL_REGISTRY[self._active_model_id]["name"]

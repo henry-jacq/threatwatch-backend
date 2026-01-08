@@ -48,14 +48,9 @@ def preprocess_and_split_data(df, test_size=0.3, val_size=0.15, fit_scaler=True,
     cols_to_keep = feature_cols + (['Label'] if has_label else [])
     df = df[cols_to_keep].copy()
     
-    # Add dummy Label ONLY if it doesn't exist
-    if not has_label:
-        df['Label'] = -1  # Default to attack label
-        logger.info("⚠️  No 'Label' column found. Added dummy labels (1 = attack) for processing.")
-    
     # Binary label conversion - ONLY apply if we have real labels
     if has_label:
-        df.loc[:, 'Label'] = df['Label'].apply(lambda x: 0 if 'BENIGN' in str(x).upper() else 1)
+        df['Label'] = df['Label'].apply(lambda x: 0 if 'BENIGN' in str(x).upper() else 1)
     # else: Label already set to 1 (dummy)
     
     # Scaling
@@ -71,5 +66,5 @@ def preprocess_and_split_data(df, test_size=0.3, val_size=0.15, fit_scaler=True,
             raise ValueError("scaler required when fit_scaler=False")
         df.loc[:, num_cols] = scaler.transform(df[num_cols])
     
-    logger.info(f"✅ Preprocessing finished. Processed {len(df)} samples")
+    logger.info(f"Preprocessing finished. Processed {len(df)} samples")
     return df, scaler
