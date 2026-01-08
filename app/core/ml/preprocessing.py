@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import logging
+from app.core.ml.constants import feature_cols
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,6 @@ def preprocess_and_split_data(df, test_size=0.3, val_size=0.15, fit_scaler=True,
     df.dropna(inplace=True)
     df.drop_duplicates(inplace=True)
     
-    # Feature selection - Label is now OPTIONAL
-    feature_cols = ['Source IP', 'Destination IP', 'Timestamp', 
-                    'Average Packet Size', 'Bwd Packets/s', 'FIN Flag Count',
-                    'SYN Flag Count', 'RST Flag Count', 'PSH Flag Count', 'ACK Flag Count',
-                    'URG Flag Count', 'CWE Flag Count', 'ECE Flag Count', 'Flow Packets/s']
-    
     # Check only for required feature columns (NOT Label)
     missing = [col for col in feature_cols if col not in df.columns]
     if missing:
@@ -55,7 +50,7 @@ def preprocess_and_split_data(df, test_size=0.3, val_size=0.15, fit_scaler=True,
     
     # Add dummy Label ONLY if it doesn't exist
     if not has_label:
-        df['Label'] = 1  # Default to attack label
+        df['Label'] = -1  # Default to attack label
         logger.info("⚠️  No 'Label' column found. Added dummy labels (1 = attack) for processing.")
     
     # Binary label conversion - ONLY apply if we have real labels

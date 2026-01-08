@@ -5,7 +5,7 @@ import torch
 import logging
 from pathlib import Path
 from typing import Optional, Tuple
-from .inference import FTGNet, FlowGNN, TrafficGNN
+from .models import FTGNet, FlowGNN, TrafficGNN
 import warnings
 
 logger = logging.getLogger(__name__)

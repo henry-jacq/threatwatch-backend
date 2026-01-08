@@ -6,7 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}🚀 DDoS Detection Platform - Local Testing${NC}"
+echo -e "${YELLOW}🚀 Threatwatch - DDoS Detection Pipeline${NC}"
 
 # Check Python
 if ! command -v python3 &> /dev/null; then
