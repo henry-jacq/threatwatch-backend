@@ -26,52 +26,46 @@ class ModelManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def load_model(self, model_id: str = None, device: str = 'auto'):
-        if model_id is None:
-            model_id = self._active_model_id
+    def load_model(self, model_id: str, device: str = "auto"):
+        if self._model is not None and getattr(self, "_model_id", None) == model_id:
+            logger.info("✅ Model already loaded (%s), returning cached instance", model_id)
+            return self._model, self._scaler, self._hyperparams
 
         if model_id not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model_id: {model_id}")
 
-        # Return cached model if already loaded
-        if self._model is not None and model_id == self._active_model_id:
-            logger.info("Model already loaded (%s)", model_id)
-            return self._model, self._scaler, self._hyperparams
-
-        # Reset cache if switching models
-        self.reset()
-        self._active_model_id = model_id
-
         checkpoint_path = MODEL_REGISTRY[model_id]["checkpoint"]
-        logger.info("Loading model [%s] from %s", model_id, checkpoint_path)
+        self._model_id = model_id
 
-        # Device
-        if device == 'auto':
-            self._device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.info("🔄 Loading model [%s] from %s", model_id, checkpoint_path)
+
+        # --- device ---
+        if device == "auto":
+            self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self._device = torch.device(device)
 
         checkpoint = torch.load(checkpoint_path, map_location=self._device, weights_only=False)
 
-        self._hyperparams = checkpoint['hyperparams']
-        self._scaler = checkpoint['scaler']
+        self._hyperparams = checkpoint["hyperparams"]
+        self._scaler = checkpoint["scaler"]
 
         flow_gnn = FlowGNN(
-            in_channels=len(self._hyperparams['feature_order']),
-            hidden_channels=self._hyperparams['hidden_size'],
-            out_channels=self._hyperparams['hidden_size']
+            in_channels=len(self._hyperparams["feature_order"]),
+            hidden_channels=self._hyperparams["hidden_size"],
+            out_channels=self._hyperparams["hidden_size"]
         )
         traffic_gnn = TrafficGNN(
-            in_channels=self._hyperparams['hidden_size'],
-            hidden_channels=self._hyperparams['hidden_size']
+            in_channels=self._hyperparams["hidden_size"],
+            hidden_channels=self._hyperparams["hidden_size"]
         )
 
         self._model = FTGNet(flow_gnn, traffic_gnn, device=self._device)
-        self._model.load_state_dict(checkpoint['model_state_dict'])
+        self._model.load_state_dict(checkpoint["model_state_dict"])
         self._model.to(self._device)
         self._model.eval()
 
-        logger.info("Active model set to %s (%s)", model_id, MODEL_REGISTRY[model_id]["name"])
+        logger.info("✅ Model [%s] loaded on %s", model_id, self._device)
         return self._model, self._scaler, self._hyperparams
 
     @property

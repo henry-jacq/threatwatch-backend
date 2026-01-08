@@ -28,9 +28,105 @@ router = APIRouter(prefix="/api/inference", tags=["inference"])
 CANCEL_FLAGS: Dict[str, bool] = {}
 
 
-# ------------------------------------------------------------------
+@router.post("/predict/pcap", response_model=InferenceResponse)
+async def predict_from_pcap(
+    file: UploadFile = File(...),
+    is_attack: bool = True
+):
+    """
+    Direct PCAP to FTG-NET inference (no CSV roundtrip)
+    """
+    import time
+    start_time = time.time()
+
+    # Load model
+    model, scaler, _ = model_manager.load_model(settings.default_model_id)
+    engine = InferenceEngine(model, model_manager.device)
+
+    # Convert PCAP → DataFrame
+    from app.core.traffic.pcap_converter import pcap_bytes_to_dataframe
+
+    df = pcap_bytes_to_dataframe(
+        await file.read(),
+        is_attack=is_attack
+    )
+
+    if df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid flows extracted from PCAP"
+        )
+
+    # Validate schema (Label exists but ignored for predict)
+    df.columns = df.columns.str.strip()
+    validate_csv_headers(df, require_label=False)
+
+    # Preprocess
+    df, _ = preprocess_and_split_data(
+        df,
+        fit_scaler=False,
+        scaler=scaler
+    )
+
+    # Build dataset
+    dataset = FTGDataset(df, has_labels=False)
+
+    traffic_graphs, flow_graphs = [], []
+    total_slots = len(dataset)
+    log_every = max(1, total_slots // 10)
+
+    for i in range(total_slots):
+        tg, fg = dataset[i]
+        traffic_graphs.append(tg)
+        flow_graphs.append(fg)
+
+        if (i + 1) % log_every == 0 or (i + 1) == total_slots:
+            logger.info(
+                "pcap-predict: %d/%d slots (%.1f%%)",
+                i + 1,
+                total_slots,
+                (i + 1) / total_slots * 100
+            )
+
+    # Inference
+    batch = engine.predict_batch(traffic_graphs, flow_graphs)
+    preds = batch["results"]
+
+    attack_count = sum(
+        1 for r in preds
+        if (
+            any(p == 1 for p in r["prediction"])
+            if isinstance(r["prediction"], list)
+            else r["prediction"] == 1
+        )
+    )
+
+    benign_count = len(preds) - attack_count
+
+    avg_conf = np.mean([
+        np.mean(r["probability"]) if isinstance(r["probability"], list)
+        else r["probability"]
+        for r in preds
+    ])
+
+    logger.info(
+        "✅ /predict/pcap done | slots=%d | attacks=%d | avg_conf=%.4f | %.2f ms",
+        len(preds),
+        attack_count,
+        avg_conf,
+        (time.time() - start_time) * 1000
+    )
+
+    return InferenceResponse(
+        total_samples=len(preds),
+        attack_count=attack_count,
+        benign_count=benign_count,
+        average_confidence=float(avg_conf),
+        processing_time_ms=(time.time() - start_time) * 1000
+    )
+
+
 # PREDICT (SYNC)
-# ------------------------------------------------------------------
 
 @router.post("/predict", response_model=InferenceResponse)
 async def predict_unlabeled(file: UploadFile = File(...)):
@@ -94,9 +190,7 @@ async def predict_unlabeled(file: UploadFile = File(...)):
     )
 
 
-# ------------------------------------------------------------------
 # PREDICT (STREAM)
-# ------------------------------------------------------------------
 
 @router.post("/predict/stream")
 async def predict_stream(file: UploadFile = File(...)):
@@ -172,9 +266,7 @@ async def predict_stream(file: UploadFile = File(...)):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# ------------------------------------------------------------------
 # EVALUATE (SYNC)
-# ------------------------------------------------------------------
 
 @router.post("/evaluate", response_model=EvaluationResponse)
 async def evaluate_labeled(file: UploadFile = File(...)):
@@ -270,7 +362,7 @@ async def stats():
     """Model statistics"""
     try:
         model, scaler, hyperparams = model_manager.load_model(
-            settings.model_checkpoint
+            settings.default_model_id
         )
         return {
             "model": "FTG-NET",

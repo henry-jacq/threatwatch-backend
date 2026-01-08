@@ -1,93 +1,91 @@
 """
-PCAP file upload and conversion endpoints
-Extracts features only - reuses /api/inference/predict for analysis
+PCAP upload & feature extraction (stateless, in-memory)
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+import io
 import logging
-import os
-from pathlib import Path
 
-from app.core.traffic.pcap_converter import pcap_to_csv
+from app.core.traffic.pcap_converter import pcap_bytes_to_dataframe
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pcap", tags=["pcap"])
 
 
+# PCAP to CSV (DOWNLOAD)
+
 @router.post("/convert")
 async def convert_pcap(
     file: UploadFile = File(...),
-    output_name: str = Query("converted", description="Output CSV filename (without .csv)")
+    output_name: str = Query(
+        "converted",
+        description="Output filename (without .csv)"
+    ),
+    is_attack: bool = Query(
+        True,
+        description="Label flows as attack (true) or benign (false)"
+    )
 ):
     """
-    Convert PCAP to model-compatible CSV dataset
-    
-    Extracts 11 features from raw network traffic.
-    Use output CSV with /api/inference/predict for analysis.
-    
-    Args:
-        file: PCAP file to convert
-        output_name: Output CSV filename
-    
-    Returns:
-        Path to extracted CSV file ready for inference
+    Convert PCAP → CSV and return as downloadable file
     """
-    try:
-        logger.info(f"Processing PCAP: {file.filename}")
-        
-        # Save uploaded file temporarily
-        temp_pcap = f"/tmp/{file.filename}"
-        contents = await file.read()
-        
-        with open(temp_pcap, "wb") as f:
-            f.write(contents)
-        
-        logger.info(f"Saved temp file: {temp_pcap}")
-        
-        # Convert PCAP to CSV (always label as unknown/attack by default)
-        output_csv = f"data/processed/{output_name}.csv"
-        os.makedirs("data/processed", exist_ok=True)
-        
-        df = pcap_to_csv(temp_pcap, output_csv, is_attack=True)
-        
-        # Cleanup temp file
-        os.remove(temp_pcap)
-        
-        logger.info(f"✅ Extraction complete: {len(df)} flows")
-        
-        return {
-            "status": "✅ success",
-            "input_file": file.filename,
-            "output_file": output_csv,
-            "flows_extracted": len(df),
-            "columns": list(df.columns),
-            "next_step": f"Upload {output_csv} to /api/inference/predict for real-time analysis"
-        }
-        
-    except Exception as e:
-        logger.error(f"PCAP conversion failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"PCAP conversion failed: {str(e)}")
 
-
-@router.get("/stats")
-async def pcap_stats(csv_file: str = Query(..., description="Path to converted CSV")):
-    """Get statistics about converted dataset"""
     try:
-        import pandas as pd
-        
-        if not os.path.exists(csv_file):
-            raise HTTPException(status_code=404, detail=f"File not found: {csv_file}")
-        
-        df = pd.read_csv(csv_file)
-        
-        return {
-            "file": csv_file,
-            "total_flows": len(df),
-            "average_packet_size": float(df['Average Packet Size'].mean()),
-            "total_columns": len(df.columns),
-            "columns": list(df.columns)
+        logger.info("📦 Converting PCAP: %s", file.filename)
+
+        df = pcap_bytes_to_dataframe(
+            await file.read(),
+            is_attack=is_attack
+        )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="No flows extracted from PCAP"
+            )
+
+        # Convert DataFrame → CSV (in memory)
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+
+        filename = f"{output_name}.csv"
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename}"'
         }
-    except HTTPException:
-        raise
+
+        logger.info("Returning CSV (%d flows) as %s", len(df), filename)
+
+        return StreamingResponse(
+            csv_buffer,
+            media_type="text/csv",
+            headers=headers
+        )
+
     except Exception as e:
+        logger.error("PCAP conversion failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# PCAP to STATS (NO CSV)
+
+@router.post("/stats")
+async def pcap_stats(
+    file: UploadFile = File(...)
+):
+    """
+    Return statistics from PCAP without exporting CSV.
+    """
+    logger.info("📊 PCAP stats request: %s", file.filename)
+
+    df = pcap_bytes_to_dataframe(await file.read(), is_attack=True)
+
+    return JSONResponse({
+        "file": file.filename,
+        "total_flows": len(df),
+        "average_packet_size": float(df["Average Packet Size"].mean()),
+        "attack_ratio": float(df["Label"].mean()),
+        "columns": list(df.columns)
+    })

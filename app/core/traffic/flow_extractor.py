@@ -7,6 +7,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 class FlowExtractor:
     """Extract flows from PCAP with CICFlowMeter-like features"""
     
@@ -212,4 +213,3 @@ class FlowExtractor:
         
         logger.info(f"Generated {len(df)} flow features")
         return df[self.FEATURE_COLS]
-    

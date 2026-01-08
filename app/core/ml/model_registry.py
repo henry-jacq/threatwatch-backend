@@ -1,19 +1,22 @@
 from typing import Dict
 
-# DO NOT include ensemble models
+
 MODEL_REGISTRY: Dict[str, dict] = {
-    "ftgnet_v1": {
+    "ftg_net_v1": {
         "name": "FTG-NET v1",
-        "checkpoint": "models/checkpoints_v4_metadata/best_model_1.pt"
+        "checkpoint": "models/checkpoints_v4_metadata/best_model_1.pt",
+        "description": "Latest optimized FTG-NET"
     },
-    "ftgnet_v2": {
+    "ftg_net_v2": {
         "name": "FTG-NET v2",
-        "checkpoint": "models/checkpoints_v4_metadata/best_model_2.pt"
+        "checkpoint": "models/checkpoints_v4_metadata/best_model_2.pt",
+        "description": "Baseline FTG-NET trained on CICIDS2019"
     },
-    "ftgnet_v3": {
+    "ftg_net_v3": {
         "name": "FTG-NET v3",
-        "checkpoint": "models/checkpoints_v4_metadata/best_model_3.pt"
-    }
+        "checkpoint": "models/checkpoints_v4_metadata/best_model_3.pt",
+        "description": "Improved generalization"
+    },
 }
 
 DEFAULT_MODEL_ID = "ftgnet_v1"

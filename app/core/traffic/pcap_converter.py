@@ -1,32 +1,38 @@
 """
-PCAP to CICFlowMeter-compatible Dataset Converter
-Converts raw PCAP files to the 11-feature dataset format
+PCAP to CICFlowMeter-style feature extraction (SAFE TEMP FILE)
 """
 import logging
+import tempfile
+import os
+import pandas as pd
+
 from app.core.traffic.flow_extractor import FlowExtractor
 
 logger = logging.getLogger(__name__)
 
 
-def pcap_to_csv(pcap_path: str, output_csv: str, is_attack: bool = True):
+def pcap_bytes_to_dataframe(pcap_bytes: bytes, is_attack: bool = True) -> pd.DataFrame:
     """
-    Convert PCAP file to CSV dataset
-    
-    Args:
-        pcap_path: Path to input PCAP
-        output_csv: Path to output CSV
-        is_attack: Label (1 = attack, 0 = benign)
-    
-    Returns:
-        Generated DataFrame
+    Convert raw PCAP bytes to DataFrame safely.
+    Temp file exists ONLY during extraction.
     """
-    logger.info(f"Converting PCAP to CSV: {pcap_path} -> {output_csv}")
-    
-    extractor = FlowExtractor(pcap_path, is_attack=is_attack)
-    df = extractor.extract_flows()
-    
-    # Save to CSV
-    df.to_csv(output_csv, index=False)
-    logger.info(f"✅ Saved {len(df)} flows to {output_csv}")
-    
-    return df
+
+    tmp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pcap") as tmp:
+            tmp.write(pcap_bytes)
+            tmp_path = tmp.name
+
+        logger.info("Temporary PCAP created: %s", tmp_path)
+
+        extractor = FlowExtractor(tmp_path, is_attack=is_attack)
+        df = extractor.extract_flows()
+
+        logger.info("Extracted %d flows", len(df))
+        return df
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+            logger.info("Temporary PCAP deleted: %s", tmp_path)

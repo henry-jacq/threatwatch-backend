@@ -7,12 +7,12 @@ import os
 
 class Settings(BaseSettings):
     """Application settings"""
-    app_name: str = "DDoS Detection Platform"
+    app_name: str = "Threatwatch"
     debug: bool = True
     api_version: str = "v1"
     
     # Model
-    model_checkpoint: str = "models/checkpoints_v4_metadata/best_model_1.pt"
+    default_model_id: str = "ftg_net_v1"
     device: str = "auto"  # auto, cuda, cpu
     
     # Server
