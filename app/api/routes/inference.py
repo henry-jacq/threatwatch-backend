@@ -20,6 +20,7 @@ from app.config import settings
 from app.core.ml.model_loader import model_manager
 from app.core.ml.preprocessing import preprocess_and_split_data
 from app.core.ml.inference import InferenceEngine
+from app.core.ml.model_registry import MODEL_REGISTRY
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/inference", tags=["inference"])
@@ -36,7 +37,7 @@ async def predict_unlabeled(file: UploadFile = File(...)):
     import time
     start_time = time.time()
 
-    model, scaler, _ = model_manager.load_model(settings.model_checkpoint)
+    model, scaler, _ = model_manager.load_model()
 
     df = read_csv_safe(await file.read())
     df.columns = df.columns.str.strip()
@@ -108,7 +109,7 @@ async def predict_stream(file: UploadFile = File(...)):
 
         yield f"data: {json.dumps({'stage': 'job_started', 'job_id': job_id})}\n\n"
 
-        model, scaler, _ = model_manager.load_model(settings.model_checkpoint)
+        model, scaler, _ = model_manager.load_model()
         engine = InferenceEngine(model, model_manager.device)
 
         yield f"data: {json.dumps({'stage': 'preprocessing'})}\n\n"
@@ -177,7 +178,7 @@ async def predict_stream(file: UploadFile = File(...)):
 
 @router.post("/evaluate", response_model=EvaluationResponse)
 async def evaluate_labeled(file: UploadFile = File(...)):
-    model, scaler, _ = model_manager.load_model(settings.model_checkpoint)
+    model, scaler, _ = model_manager.load_model()
 
     df = read_csv_safe(await file.read())
     df.columns = df.columns.str.strip()
@@ -222,10 +223,6 @@ async def evaluate_labeled(file: UploadFile = File(...)):
     )
 
 
-# ------------------------------------------------------------------
-# CANCEL
-# ------------------------------------------------------------------
-
 @router.post("/cancel/{job_id}")
 async def cancel_job(job_id: str):
     CANCEL_FLAGS[job_id] = True
@@ -233,11 +230,36 @@ async def cancel_job(job_id: str):
     return {"status": "cancelled", "job_id": job_id}
 
 
+@router.get("/models")
+async def list_models():
+    """List available models"""
+    return model_manager.list_models()
+
+
+@router.get("/models/active")
+async def active_model():
+    """Get currently active model"""
+    return model_manager.get_active_model()
+
+
+@router.post("/models/{model_id}")
+async def switch_model(model_id: str):
+    """Switch active model (hot reload)"""
+    try:
+        model_manager.set_active_model(model_id)
+        return {
+            "status": "switched",
+            "model": model_manager.get_active_model()
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Health check"""
     try:
-        model_manager.load_model(settings.model_checkpoint)
+        model_manager.load_model()
         return {"status": "Healthy", "model": "FTG-NET v1", "device": str(model_manager.device)}
     except Exception as e:
         return {"status": "Unhealthy", "error": str(e)}

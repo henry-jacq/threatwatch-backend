@@ -3,10 +3,11 @@ Singleton model loader for efficient model management
 """
 import torch
 import logging
+import warnings
 from pathlib import Path
 from typing import Optional, Tuple
 from .models import FTGNet, FlowGNN, TrafficGNN
-import warnings
+from app.core.ml.model_registry import MODEL_REGISTRY, DEFAULT_MODEL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -18,42 +19,43 @@ class ModelManager:
     _scaler: Optional[object] = None
     _hyperparams: Optional[dict] = None
     _device: Optional[torch.device] = None
+    _active_model_id: str = DEFAULT_MODEL_ID
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def load_model(self, checkpoint_path: str, device: str = 'auto') -> Tuple[FTGNet, object, dict]:
-        """Load model from checkpoint (singleton pattern)"""
-        if self._model is not None:
-            logger.info("✅ Model already loaded, returning cached instance")
+    def load_model(self, model_id: str = None, device: str = 'auto'):
+        if model_id is None:
+            model_id = self._active_model_id
+
+        if model_id not in MODEL_REGISTRY:
+            raise ValueError(f"Unknown model_id: {model_id}")
+
+        # Return cached model if already loaded
+        if self._model is not None and model_id == self._active_model_id:
+            logger.info("Model already loaded (%s)", model_id)
             return self._model, self._scaler, self._hyperparams
 
-        logger.info(f"🔄 Loading model from {checkpoint_path}")
-        
-        # Determine device
+        # Reset cache if switching models
+        self.reset()
+        self._active_model_id = model_id
+
+        checkpoint_path = MODEL_REGISTRY[model_id]["checkpoint"]
+        logger.info("Loading model [%s] from %s", model_id, checkpoint_path)
+
+        # Device
         if device == 'auto':
             self._device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self._device = torch.device(device)
-        
-        if not Path(checkpoint_path).exists():
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-        
-        # Load checkpoint with weights_only=True for security (but allows compatibility)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            checkpoint = torch.load(checkpoint_path, map_location=self._device, weights_only=False)
-        
+
+        checkpoint = torch.load(checkpoint_path, map_location=self._device, weights_only=False)
+
         self._hyperparams = checkpoint['hyperparams']
         self._scaler = checkpoint['scaler']
-        
-        logger.info(f"Checkpoint loaded. Trained for {checkpoint.get('epoch', 'unknown')} epochs")
-        logger.info(f"Features: {len(self._hyperparams['feature_order'])}")
-        logger.info(f"Hidden size: {self._hyperparams['hidden_size']}")
-        
-        # Build architecture
+
         flow_gnn = FlowGNN(
             in_channels=len(self._hyperparams['feature_order']),
             hidden_channels=self._hyperparams['hidden_size'],
@@ -63,12 +65,13 @@ class ModelManager:
             in_channels=self._hyperparams['hidden_size'],
             hidden_channels=self._hyperparams['hidden_size']
         )
+
         self._model = FTGNet(flow_gnn, traffic_gnn, device=self._device)
         self._model.load_state_dict(checkpoint['model_state_dict'])
         self._model.to(self._device)
         self._model.eval()
-        
-        logger.info(f"✅ Model loaded on device: {self._device}")
+
+        logger.info("Active model set to %s (%s)", model_id, MODEL_REGISTRY[model_id]["name"])
         return self._model, self._scaler, self._hyperparams
 
     @property
@@ -100,6 +103,28 @@ class ModelManager:
         self._hyperparams = None
         self._device = None
         logger.info("ModelManager reset")
+        
+    def list_models(self):
+        return {
+            k: {
+                "name": v["name"],
+                "active": k == self._active_model_id
+            }
+            for k, v in MODEL_REGISTRY.items()
+        }
+
+    def set_active_model(self, model_id: str):
+        if model_id not in MODEL_REGISTRY:
+            raise ValueError("Invalid model_id")
+        self.reset()
+        self._active_model_id = model_id
+        logger.warning("Switched active model to %s", model_id)
+
+    def get_active_model(self):
+        return {
+            "model_id": self._active_model_id,
+            "name": MODEL_REGISTRY[self._active_model_id]["name"]
+        }
 
 
 # Global singleton instance
