@@ -6,6 +6,7 @@ Model inference endpoints
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+import torch
 import json
 import numpy as np
 import logging
@@ -184,27 +185,49 @@ async def predict_unlabeled(file: UploadFile = File(...)):
 # PREDICT (STREAM)
 
 @router.post("/predict/stream")
-async def predict_stream(file: UploadFile = File(...)):
+async def start_stream_job(file: UploadFile = File(...)):
+    job_id = str(uuid.uuid4())
+    CANCEL_FLAGS[job_id] = False
+
+    # Store file bytes in memory (simple + safe for now)
+    file_bytes = await file.read()
+
+    STREAM_JOBS[job_id] = {
+        "file": file_bytes,
+        "status": "started"
+    }
+
+    return {"job_id": job_id}
+
+
+STREAM_JOBS: Dict[str, dict] = {}
+
+@router.get("/predict/stream/{job_id}")
+async def stream_job(job_id: str):
+
+    if job_id not in STREAM_JOBS:
+        raise HTTPException(status_code=404, detail="Invalid job id")
+
     async def event_generator():
-        import time
+        import time, asyncio
         start_time = time.time()
 
-        job_id = str(uuid.uuid4())
-        CANCEL_FLAGS[job_id] = False
-
         yield f"data: {json.dumps({'stage': 'job_started', 'job_id': job_id})}\n\n"
+        await asyncio.sleep(0)
 
         model, scaler, _ = model_manager.load_model(settings.default_model_id)
         engine = InferenceEngine(model, model_manager.device)
 
         yield f"data: {json.dumps({'stage': 'preprocessing'})}\n\n"
+        await asyncio.sleep(0)
 
-        df = read_csv_safe(await file.read())
+        df = read_csv_safe(STREAM_JOBS[job_id]["file"])
         df.columns = df.columns.str.strip()
         validate_csv_headers(df, require_label=False)
-        df, _ = preprocess_and_split_data(df, fit_scaler=False, scaler=scaler)
 
+        df, _ = preprocess_and_split_data(df, fit_scaler=False, scaler=scaler)
         dataset = FTGDataset(df, has_labels=False)
+
         total = len(dataset)
         step = max(1, total // 10)
 
@@ -212,27 +235,27 @@ async def predict_stream(file: UploadFile = File(...)):
 
         for idx, (tg, fg) in enumerate(dataset, start=1):
             if CANCEL_FLAGS.get(job_id):
-                yield f"data: {json.dumps({'stage': 'cancelled', 'job_id': job_id})}\n\n"
-                CANCEL_FLAGS.pop(job_id, None)
+                yield f"data: {json.dumps({'stage': 'cancelled'})}\n\n"
+                await asyncio.sleep(0)
                 return
 
             traffic_graphs.append(tg)
             flow_graphs.append(fg)
 
-            if (idx + 1) % step == 0 or (idx + 1) == total:
+            if idx % step == 0 or idx == total:
                 yield f"data: {json.dumps({
                     'stage': 'progress',
-                    'current': idx + 1,
+                    'current': idx,
                     'total': total
                 })}\n\n"
+                await asyncio.sleep(0)
 
         batch = engine.predict_batch(traffic_graphs, flow_graphs)
         preds = batch["results"]
 
         attack_count = sum(
             1 for r in preds
-            if (any(p == 1 for p in r["prediction"])
-                if isinstance(r["prediction"], list)
+            if (any(r["prediction"]) if isinstance(r["prediction"], list)
                 else r["prediction"] == 1)
         )
 
@@ -250,10 +273,21 @@ async def predict_stream(file: UploadFile = File(...)):
             'average_confidence': float(avg_conf),
             'processing_time_ms': round((time.time() - start_time) * 1000, 2)
         })}\n\n"
+        await asyncio.sleep(0)
 
+        STREAM_JOBS.pop(job_id, None)
         CANCEL_FLAGS.pop(job_id, None)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 
 # EVALUATE (SYNC)
@@ -336,31 +370,42 @@ async def switch_model(model_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @router.get("/health")
-async def health_check():
-    """Health check"""
+async def health():
+    """
+    Liveness check.
+    If this responds, the service is UP.
+    """
+    return {
+        "alive": True
+    }
+
+@router.get("/status")
+async def status():
+    """
+    Readiness + system + model summary (merged)
+    """
     try:
+        # Ensure model is loadable
         model_manager.load_model(settings.default_model_id)
-        return {"status": "Healthy", "model": "FTG-NET v1", "device": str(model_manager.device)}
-    except Exception as e:
-        return {"status": "Unhealthy", "error": str(e)}
+        summary = model_manager.get_model_summary()
 
-
-@router.get("/stats")
-async def stats():
-    """Model statistics"""
-    try:
-        model, scaler, hyperparams = model_manager.load_model(
-            settings.default_model_id
-        )
         return {
-            "model": "FTG-NET",
-            "version": "1.0",
-            "features": len(hyperparams['feature_order']),
-            "feature_list": hyperparams['feature_order'],
-            "hidden_size": hyperparams['hidden_size'],
-            "device": str(model_manager.device)
+            "ready": True,
+            "device": str(model_manager.device),
+            "cuda_available": torch.cuda.is_available(),
+
+            "model": {
+                "model_id": summary["model_id"],
+                "name": summary["name"],
+                "loaded": summary["loaded"],
+                "feature_count": summary["architecture"]["num_features"],
+                "hidden_size": summary["architecture"]["hidden_size"],
+            }
         }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "ready": False,
+            "error": str(e)
+        }

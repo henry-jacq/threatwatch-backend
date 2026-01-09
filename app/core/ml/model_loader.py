@@ -102,7 +102,8 @@ class ModelManager:
         return {
             k: {
                 "name": v["name"],
-                "active": k == self._active_model_id
+                "active": k == self._active_model_id,
+                "description": v["description"]
             }
             for k, v in MODEL_REGISTRY.items()
         }
@@ -124,6 +125,70 @@ class ModelManager:
             "model_id": self._active_model_id,
             "name": MODEL_REGISTRY[self._active_model_id]["name"]
         }
+        
+    def get_model_summary(self):
+        if self._active_model_id not in MODEL_REGISTRY:
+            raise RuntimeError(
+                f"Active model_id '{self._active_model_id}' not found in MODEL_REGISTRY"
+            )
+
+        reg = MODEL_REGISTRY[self._active_model_id]
+
+        summary = {
+            # Identity
+            "model_id": self._active_model_id,
+            "name": reg.get("name"),
+            "description": reg.get("description"),
+            "active": True,
+
+            # Checkpoint
+            "checkpoint": str(reg.get("checkpoint")),
+            "checkpoint_exists": Path(reg.get("checkpoint")).exists(),
+
+            # Runtime
+            "loaded": self._model is not None,
+            "device": str(self._device) if self._device else None,
+
+            # Capabilities
+            "capabilities": {
+                "csv_inference": True,
+                "pcap_inference": True,
+                "streaming_inference": True,
+                "live_capture": False,   # reserved for future
+                "model_switching": True,
+            },
+        }
+
+        # Architecture details (only if loaded)
+        if self._model is not None and self._hyperparams is not None:
+            try:
+                total_params = sum(p.numel() for p in self._model.parameters())
+                trainable_params = sum(
+                    p.numel() for p in self._model.parameters() if p.requires_grad
+                )
+            except Exception:
+                total_params = None
+                trainable_params = None
+
+            summary.update({
+                "architecture": {
+                    "model_class": self._model.__class__.__name__,
+                    "flow_gnn": self._model.flow_gnn.__class__.__name__,
+                    "traffic_gnn": self._model.traffic_gnn.__class__.__name__,
+                    "hidden_size": self._hyperparams.get("hidden_size"),
+                    "num_features": len(self._hyperparams.get("feature_order", [])),
+                    "feature_list": self._hyperparams.get("feature_order"),
+                },
+                "parameters": {
+                    "total": total_params,
+                    "trainable": trainable_params,
+                },
+            })
+        else:
+            summary["architecture"] = None
+            summary["parameters"] = None
+
+        return summary
 
 
 # Global singleton instance
