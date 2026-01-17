@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    logger.info("🚀 Application starting...")
+    logger.info("Application starting...")
     yield
-    logger.info("🛑 Application shutting down...")
+    logger.info("Application shutting down...")
 
 
 # Create app
@@ -54,10 +54,10 @@ app.include_router(pcap.router)
 async def root():
     """Root endpoint"""
     return {
-        "message": "🚀 DDoS Detection Platform",
+        "message": "DDoS Detection Platform",
         "version": "1.0.0",
         "model": "FTG-NET",
-        "status": "✅ online",
+        "status": "online",
         "docs": "Visit http://localhost:8000/docs for Swagger UI",
         "endpoints": {
             "docs": "/docs",
