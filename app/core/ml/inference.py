@@ -38,21 +38,16 @@ class InferenceEngine:
         
         with torch.no_grad():
             output = self.model(traffic_graph, flow_graphs)
-            probs = output.squeeze().cpu().numpy()
+            probs = np.atleast_1d(output.squeeze().cpu().numpy())
         
         inference_time = time.time() - start_time
         
-        if isinstance(probs, np.ndarray):
-            preds = (probs > threshold).astype(int)
-            is_attack = bool(np.any(preds))
-            avg_prob = float(np.mean(probs))
-        else:
-            preds = int(probs > threshold)
-            is_attack = bool(preds)
-            avg_prob = float(probs)
+        preds = (probs > threshold).astype(int)
+        is_attack = bool(np.any(preds))
+        avg_prob = float(np.mean(probs))
 
         return {
-            "prediction": preds.tolist() if isinstance(preds, np.ndarray) else preds,
+            "prediction": preds.tolist(),
             "probability": avg_prob,
             "is_attack": is_attack,
             "inference_time_ms": inference_time * 1000,
@@ -90,7 +85,11 @@ class InferenceEngine:
 
         with torch.no_grad():
             outputs = self.model(traffic_batch, flat_flow_graphs)
-            probs = outputs.squeeze().cpu().numpy()
+            probs = np.atleast_1d(outputs.squeeze().cpu().numpy())
+
+        expected = sum(flow_splits)
+        if probs.shape[0] != expected:
+            raise ValueError(f"Model output size mismatch: got={probs.shape[0]} expected={expected}")
 
         # Split predictions back per slot
         results = []
@@ -117,4 +116,3 @@ class InferenceEngine:
             "results": results,
             "batch_inference_time_ms": (time.time() - start_time) * 1000
         }
-

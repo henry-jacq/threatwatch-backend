@@ -8,7 +8,11 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.api.routes import inference, pcap
+from app.api.routes import inference, pcap, labs
+from app.core.live.redis_consumer import redis_live_consumer
+import asyncio
+
+
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +26,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     logger.info("Application starting...")
+    consumer_task = asyncio.create_task(redis_live_consumer())
     yield
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        logger.info("Live consumer task stopped")
     logger.info("Application shutting down...")
 
 
@@ -48,6 +58,7 @@ app.add_middleware(
 # Include routes
 app.include_router(inference.router)
 app.include_router(pcap.router)
+app.include_router(labs.router)
 
 
 @app.get("/")

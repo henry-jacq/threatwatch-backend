@@ -1,22 +1,45 @@
-version: '3.8'
 
 services:
-  app:
-    build: .
-    container_name: ddos-detection-app
+
+  redis:
+    image: redis:7
+    container_name: ddos-redis
     ports:
-      - "8000:8000"
-    environment:
-      - DEBUG=True
-      - DEVICE=cpu
-    volumes:
-      - ./app:/app/app
-      - ./models:/app/models
-      - ./data:/app/data
-    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - "6379:6379"
     networks:
-      - ddos-net
+      control-net:
+        aliases:
+          - ddos-redis
+          - redis
+
+  attacker:
+    build: ./attacker
+    container_name: ddos-attacker
+    networks:
+      - lab-net
+
+  victim:
+    build:
+      context: .
+      dockerfile: victim/Dockerfile
+    container_name: ddos-victim
+    depends_on:
+      - redis
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      - lab-net
+      - control-net
+    hostname: victim
+    environment:
+      - REDIS_HOST=redis
+      - CAPTURE_INTERFACE=eth0
 
 networks:
-  ddos-net:
+  control-net:
     driver: bridge
+
+  lab-net:
+    driver: bridge
+    internal: true

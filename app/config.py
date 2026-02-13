@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     port: int = 8000
     reload: bool = True
     
+    redis_host: str = "localhost"
+    
     class Config:
         env_file = ".env"
         protected_namespaces = ('settings_',)  # Fix Pydantic warning

@@ -26,4 +26,6 @@ fi
 
 # Start app
 echo -e "${GREEN}✅ Starting FastAPI application...${NC}"
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# Live lab uses in-process background tasks and in-memory status.
+# Running multiple workers will create multiple consumers and inconsistent /api/lab/status responses.
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --workers 1

@@ -243,11 +243,13 @@ async def stream_job(job_id: str):
             flow_graphs.append(fg)
 
             if idx % step == 0 or idx == total:
-                yield f"data: {json.dumps({
-                    'stage': 'progress',
-                    'current': idx,
-                    'total': total
-                })}\n\n"
+                payload = {
+                    "stage": "progress",
+                    "current": idx,
+                    "total": total
+                }
+
+                yield f"data: {json.dumps(payload)}\n\n"
                 await asyncio.sleep(0)
 
         batch = engine.predict_batch(traffic_graphs, flow_graphs)
@@ -265,14 +267,16 @@ async def stream_job(job_id: str):
             for r in preds
         ])
 
-        yield f"data: {json.dumps({
-            'stage': 'done',
-            'total_samples': len(preds),
-            'attack_count': attack_count,
-            'benign_count': len(preds) - attack_count,
-            'average_confidence': float(avg_conf),
-            'processing_time_ms': round((time.time() - start_time) * 1000, 2)
-        })}\n\n"
+        payload = {
+            "stage": "done",
+            "total_samples": len(preds),
+            "attack_count": attack_count,
+            "benign_count": len(preds) - attack_count,
+            "average_confidence": float(avg_conf),
+            "processing_time_ms": round((time.time() - start_time) * 1000, 2)
+        }
+
+        yield f"data: {json.dumps(payload)}\n\n"
         await asyncio.sleep(0)
 
         STREAM_JOBS.pop(job_id, None)
