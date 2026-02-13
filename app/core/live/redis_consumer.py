@@ -37,6 +37,9 @@ CONSUMER_STATUS = {
     "last_entry_id": None,
     "last_flow_count": None,
     "last_flow_sample": None,
+    # Debug: number of distinct sources seen in the last payload window.
+    "last_unique_source_count": None,
+    "last_unique_source_sample": None,
 }
 
 # Adaptive state
@@ -171,6 +174,17 @@ async def redis_live_consumer():
                         CONSUMER_STATUS["last_flow_count"] = int(len(df))
                         flows = payload.get("flows", [])
                         CONSUMER_STATUS["last_flow_sample"] = flows[0] if flows else None
+                        # Unique sources (typically attacker container IPs).
+                        srcs = []
+                        for f in flows:
+                            if not isinstance(f, dict):
+                                continue
+                            v = f.get("Source IP") or f.get("Src IP") or f.get("src_ip") or f.get("source_ip")
+                            if v:
+                                srcs.append(str(v))
+                        uniq = sorted(set(srcs))
+                        CONSUMER_STATUS["last_unique_source_count"] = int(len(uniq))
+                        CONSUMER_STATUS["last_unique_source_sample"] = uniq[:8]
 
                         if df.empty:
                             continue
