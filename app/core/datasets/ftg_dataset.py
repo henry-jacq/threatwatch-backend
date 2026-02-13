@@ -5,9 +5,12 @@ from torch_geometric.data import Data
 
 class FTGDataset:
     def __init__(self, df, time_slot_duration='5s', min_packets_per_flow=1,
-                 require_shared_ips=False, min_flows_per_slot=1, has_labels=True):
+                 require_shared_ips=False, min_flows_per_slot=1, has_labels=True,
+                 max_full_traffic_nodes: int = 200, traffic_k: int = 4):
 
         self.has_labels = has_labels
+        self.max_full_traffic_nodes = int(max_full_traffic_nodes)
+        self.traffic_k = int(traffic_k)
         df = df.copy()
 
         df['Timestamp'] = df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors="coerce")
@@ -54,10 +57,24 @@ class FTGDataset:
 
             flow_graphs.append(Data(x=x, edge_index=edges, y=label))
 
+        # Traffic-level graph edges:
+        # Fully connecting is O(n^2) and becomes a bottleneck at high throughput.
+        # Keep full connectivity for small graphs, and switch to bounded-degree ring neighbors for large graphs.
+        n = len(flow_graphs)
         traffic_edges = []
-        for i in range(len(flow_graphs)):
-            for j in range(i + 1, len(flow_graphs)):
-                traffic_edges += [[i, j], [j, i]]
+
+        if n <= 1:
+            traffic_edges = [[0, 0]]
+        elif n <= self.max_full_traffic_nodes:
+            for i in range(n):
+                for j in range(i + 1, n):
+                    traffic_edges += [[i, j], [j, i]]
+        else:
+            k = max(1, min(self.traffic_k, n - 1))
+            for i in range(n):
+                for step in range(1, k + 1):
+                    j = (i + step) % n
+                    traffic_edges += [[i, j], [j, i]]
 
         if not traffic_edges:
             traffic_edges = [[0, 0]]

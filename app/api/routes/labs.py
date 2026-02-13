@@ -6,10 +6,15 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.core.live.lab_manager import get_lab_status, stop_lab_attack, trigger_attack
-from app.core.live.lab_manager import stop_lab_traffic, trigger_traffic
-from app.core.live.lab_state import SUPPORTED_ATTACKS, SUPPORTED_TRAFFIC
-from app.core.live.lab_controller import _get_container
+from app.core.live.lab_manager import (
+    get_lab_status,
+    stop_lab_attack,
+    trigger_attack,
+    trigger_attack_load,
+)
+from app.core.live.lab_manager import stop_lab_traffic, trigger_traffic, trigger_traffic_load
+from app.core.live.lab_state import SUPPORTED_ATTACKS, SUPPORTED_TRAFFIC, SUPPORTED_INTENSITY
+from app.core.live.lab_controller import _get_container, set_attacker_count
 
 router = APIRouter(prefix="/api/lab", tags=["lab"])
 
@@ -29,7 +34,11 @@ async def stream_status():
             latest_payload_ts = (current.get("redis_debug") or {}).get("latest_payload_timestamp")
             attack_state = (current.get("attack_running"), current.get("attack_type"))
             traffic_state = (current.get("traffic_running"), current.get("traffic_type"))
-            key = (latest_results_ts, latest_payload_ts, attack_state, traffic_state)
+            consumer_key = (
+                (current.get("consumer") or {}).get("connected"),
+                (current.get("consumer") or {}).get("last_error"),
+            )
+            key = (latest_results_ts, latest_payload_ts, attack_state, traffic_state, consumer_key)
 
             if key != last_key:
                 last_key = key
@@ -52,8 +61,13 @@ async def stream_status():
 
 
 @router.post("/attack/start")
-async def start_attack(type: Literal["syn", "udp", "http", "random"] = "syn"):
-    success = trigger_attack(type)
+async def start_attack(
+    type: Literal["udp", "http", "dns", "ntp", "ssdp"] = "udp",
+    intensity: Literal["low", "medium", "high"] = "medium",
+    pps: int | None = None,
+    interval_ms: int | None = None,
+):
+    success = trigger_attack_load(type, intensity, pps, interval_ms)
 
     if not success:
         raise HTTPException(
@@ -61,11 +75,13 @@ async def start_attack(type: Literal["syn", "udp", "http", "random"] = "syn"):
             detail={
                 "error": "Failed to start attack",
                 "type": type,
+                "intensity": intensity,
                 "supported_types": sorted(SUPPORTED_ATTACKS),
+                "supported_intensity": sorted(SUPPORTED_INTENSITY),
             },
         )
 
-    return {"attack_started": True, "type": type}
+    return {"attack_started": True, "type": type, "intensity": intensity, "pps": pps, "interval_ms": interval_ms}
 
 
 @router.post("/attack/stop")
@@ -78,8 +94,12 @@ async def stop_attack():
 
 
 @router.post("/traffic/start")
-async def start_traffic(type: Literal["http", "ping", "mixed"] = "mixed"):
-    success = trigger_traffic(type)
+async def start_traffic(
+    type: Literal["http", "ping", "mixed", "cic_benign"] = "mixed",
+    intensity: Literal["low", "medium", "high"] = "medium",
+    interval_ms: int | None = None,
+):
+    success = trigger_traffic_load(type, intensity, interval_ms)
 
     if not success:
         raise HTTPException(
@@ -87,11 +107,13 @@ async def start_traffic(type: Literal["http", "ping", "mixed"] = "mixed"):
             detail={
                 "error": "Failed to start normal traffic",
                 "type": type,
+                "intensity": intensity,
                 "supported_types": sorted(SUPPORTED_TRAFFIC),
+                "supported_intensity": sorted(SUPPORTED_INTENSITY),
             },
         )
 
-    return {"traffic_started": True, "type": type}
+    return {"traffic_started": True, "type": type, "intensity": intensity, "interval_ms": interval_ms}
 
 
 @router.post("/traffic/stop")
@@ -137,3 +159,30 @@ async def debug_agent():
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"agent_debug": stdout}
+
+
+@router.get("/attackers")
+async def get_attackers():
+    s = get_lab_status()
+    return {
+        "count": s.get("attacker_count") or 1,
+        "running_count": s.get("attacker_running_count") or 0,
+        "names": s.get("attacker_names") or [],
+    }
+
+
+@router.post("/attackers/set")
+async def set_attackers(count: int = 1):
+    ok = set_attacker_count(count)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "Failed to set attacker count", "count": count},
+        )
+    s = get_lab_status()
+    return {
+        "attackers_set": True,
+        "count": s.get("attacker_count") or count,
+        "running_count": s.get("attacker_running_count") or 0,
+        "names": s.get("attacker_names") or [],
+    }

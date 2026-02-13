@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 STREAM_NAME = "ddos_stream"
 GROUP_NAME = "backend-group"
 CONSUMER_NAME = "backend-1"
+PENDING_MIN_IDLE_MS = 30_000
 
 LATEST_RESULT = None
 CONSUMER_STATUS = {
@@ -51,6 +52,50 @@ def get_latest_result():
 
 def get_consumer_status():
     return deepcopy(CONSUMER_STATUS)
+
+
+async def _ack_and_delete(redis_client: redis.Redis, entry_id: str) -> None:
+    """
+    Remove the message from both the consumer group pending list and the stream.
+    Keeping Redis empty is a lab requirement.
+    """
+    try:
+        pipe = redis_client.pipeline()
+        pipe.xack(STREAM_NAME, GROUP_NAME, entry_id)
+        pipe.xdel(STREAM_NAME, entry_id)
+        await pipe.execute()
+    except Exception as exc:
+        logger.warning("Failed to ACK+DEL Redis entry %s: %s", entry_id, exc)
+
+
+async def _read_pending(redis_client: redis.Redis):
+    """
+    Reclaim and process pending messages (e.g. after a crash) so they don't remain in Redis.
+    Returns a list of (entry_id, data) pairs.
+    """
+    try:
+        # redis-py asyncio returns: (next_start_id, [(id, {fields})...], deleted_count?)
+        res = await redis_client.xautoclaim(
+            STREAM_NAME,
+            GROUP_NAME,
+            CONSUMER_NAME,
+            min_idle_time=PENDING_MIN_IDLE_MS,
+            start_id="0-0",
+            count=50,
+        )
+    except Exception as exc:
+        logger.debug("XAUTOCLAIM failed: %s", exc)
+        return []
+
+    if not res:
+        return []
+
+    # Handle both old/new return shapes defensively.
+    entries = []
+    if isinstance(res, (list, tuple)) and len(res) >= 2:
+        entries = res[1] or []
+
+    return entries
 
 
 async def redis_live_consumer():
@@ -85,14 +130,23 @@ async def redis_live_consumer():
         logger.info("Live Redis consumer started")
 
         while True:
+            # 1) Drain stale pending messages first.
+            pending_entries = await _read_pending(redis_client)
+            if pending_entries:
+                messages = [(STREAM_NAME, pending_entries)]
+            else:
+                messages = None
+
+            # 2) Then block for new messages.
             try:
-                messages = await redis_client.xreadgroup(
-                    groupname=GROUP_NAME,
-                    consumername=CONSUMER_NAME,
-                    streams={STREAM_NAME: ">"},
-                    count=10,
-                    block=5000,
-                )
+                if messages is None:
+                    messages = await redis_client.xreadgroup(
+                        groupname=GROUP_NAME,
+                        consumername=CONSUMER_NAME,
+                        streams={STREAM_NAME: ">"},
+                        count=10,
+                        block=5000,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -213,15 +267,7 @@ async def redis_live_consumer():
                         CONSUMER_STATUS["last_error"] = str(exc)
                         logger.error("Live inference error: %s", exc, exc_info=True)
                     finally:
-                        try:
-                            await redis_client.xack(STREAM_NAME, GROUP_NAME, entry_id)
-                        except Exception as ack_exc:
-                            logger.warning("Failed to ACK Redis entry %s: %s", entry_id, ack_exc)
-                        # Drain the stream: once processed, delete the entry so Redis doesn't retain traffic windows.
-                        try:
-                            await redis_client.xdel(STREAM_NAME, entry_id)
-                        except Exception as del_exc:
-                            logger.warning("Failed to XDEL Redis entry %s: %s", entry_id, del_exc)
+                        await _ack_and_delete(redis_client, entry_id)
     except asyncio.CancelledError:
         logger.info("Live Redis consumer cancelled")
         raise
