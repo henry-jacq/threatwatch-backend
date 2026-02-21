@@ -87,9 +87,22 @@ class InferenceEngine:
             outputs = self.model(traffic_batch, flat_flow_graphs)
             probs = np.atleast_1d(outputs.squeeze().cpu().numpy())
 
-        expected = sum(flow_splits)
-        if probs.shape[0] != expected:
-            raise ValueError(f"Model output size mismatch: got={probs.shape[0]} expected={expected}")
+        expected_total = int(sum(flow_splits))
+        n_slots = int(len(flow_splits))
+
+        # Some model variants may output per-slot probabilities instead of per-flow probabilities.
+        # Normalize to a flat per-flow probability vector to keep the rest of the pipeline stable.
+        if probs.shape[0] == expected_total:
+            pass
+        elif probs.shape[0] == n_slots:
+            expanded = []
+            for p, count in zip(probs.tolist(), flow_splits):
+                expanded.extend([float(p)] * int(count))
+            probs = np.asarray(expanded, dtype=float)
+        elif probs.shape[0] == 1 and expected_total > 1:
+            probs = np.repeat(probs.astype(float), expected_total)
+        elif probs.shape[0] != expected_total:
+            raise ValueError(f"Model output size mismatch: got={probs.shape[0]} expected={expected_total}")
 
         # Split predictions back per slot
         results = []

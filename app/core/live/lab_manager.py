@@ -47,6 +47,10 @@ def _get_redis_debug(consumer_status: dict):
         "latest_flow_sample": None,
         "latest_unique_source_count": None,
         "latest_unique_source_sample": None,
+        "latest_raw_flow_count": None,
+        "latest_post_preprocess_flow_count": None,
+        "latest_slot_count": None,
+        "latest_total_flow_graphs": None,
         "error": None,
     }
 
@@ -63,6 +67,10 @@ def _get_redis_debug(consumer_status: dict):
     debug["latest_flow_sample"] = consumer_status.get("last_flow_sample")
     debug["latest_unique_source_count"] = consumer_status.get("last_unique_source_count")
     debug["latest_unique_source_sample"] = consumer_status.get("last_unique_source_sample")
+    debug["latest_raw_flow_count"] = consumer_status.get("last_raw_flow_count")
+    debug["latest_post_preprocess_flow_count"] = consumer_status.get("last_post_preprocess_flow_count")
+    debug["latest_slot_count"] = consumer_status.get("last_slot_count")
+    debug["latest_total_flow_graphs"] = consumer_status.get("last_total_flow_graphs")
     debug["latest_payload_timestamp"] = consumer_status.get("last_message_at")
     ts = debug["latest_payload_timestamp"]
     if isinstance(ts, (int, float)):
