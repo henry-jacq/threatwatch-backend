@@ -160,7 +160,7 @@ class FTGDataset(Dataset):
             'Average Packet Size', 'Bwd Packets/s',
             'FIN Flag Count', 'SYN Flag Count', 'RST Flag Count',
             'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
-            'CWE Flag Count', 'ECE Flag Count', 'Flow Packets/s'
+            'CWR Flag Count', 'ECE Flag Count', 'Flow Packets/s'
         ]
 
         for (src_ip, dst_ip), group in endpoint_groups:

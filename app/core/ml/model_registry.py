@@ -17,6 +17,11 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "checkpoint": "models/checkpoints_v4_metadata/best_model_3.pt",
         "description": "Improved generalization"
     },
+    "ftg_net_v4": {
+        "name": "FTG-NET v4",
+        "checkpoint": "models/checkpoints_v4_metadata/best_model_1_finetuned.pt",
+        "description": "Finetuned FTG-NET v1"
+    },
 }
 
-DEFAULT_MODEL_ID = "ftg_net_v1"
+DEFAULT_MODEL_ID = "ftg_net_v4"
