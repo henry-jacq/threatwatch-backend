@@ -20,7 +20,7 @@ MODEL_REGISTRY: Dict[str, dict] = {
     "ftg_net_v4": {
         "name": "FTG-NET v4",
         "checkpoint": "models/checkpoints_v4_metadata/best_model_1_finetuned.pt",
-        "description": "Finetuned FTG-NET v1"
+        "description": "Finetuned for Lab Simulation"
     },
 }
 
